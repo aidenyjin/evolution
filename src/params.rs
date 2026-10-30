@@ -240,6 +240,7 @@ params! {
         ros_decay: "ROS spontaneous decay", "/s", 0.5, 0.0, 20.0, false, "Reactive oxygen decays on its own at this rate.";
         repair_rate: "Repair rate", "/s", 0.01, 0.0, 1.0, false, "Damage a cell can repair per second if it has energy.";
         repair_atp: "Repair cost", "ATP/µm²", 2.0, 0.0, 50.0, false, "ATP per unit biomass to repair one full unit of damage.";
+        dormancy_floor: "Dormant upkeep", "fraction", 0.1, 0.0, 1.0, false, "When a cell can't metabolise (too cold, too hot, or out of energy) it goes dormant and its upkeep drops to this fraction, like real starving bacteria. 1 = no dormancy.";
         starvation_damage: "Starvation damage", "/s", 0.04, 0.0, 1.0, false, "Damage per second while out of energy.";
         autophagy_yield: "Self-digestion yield", "ATP/µm²", 1.0, 0.0, 10.0, false, "ATP recovered by digesting own biomass when starving.";
     }

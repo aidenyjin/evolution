@@ -412,6 +412,7 @@ class App {
     $('colormode').onchange = (e) => { this.colorMode = e.target.value; this.updateColorLegend(); };
     $('tg-particles').onchange = (e) => (this.r.particlesOn = e.target.checked);
     $('tg-flagella').onchange = (e) => (this.r.detail = e.target.checked);
+    $('tg-deaths').onchange = (e) => { this.r.burstsOn = e.target.checked; if (!e.target.checked) this.r.bursts = []; };
     $('tg-zones').onchange = (e) => $('zone-labels').classList.toggle('hidden', !e.target.checked);
     $('panel-toggle').onclick = () => this.togglePanel();
 

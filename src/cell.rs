@@ -26,8 +26,25 @@ pub struct Env {
 pub enum Fate {
     Live,
     Divide,
-    Die,
+    Die(DeathCause),
 }
+
+/// Why a cell died, for statistics only.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DeathCause {
+    /// Too cold for its enzymes to work, so it ran out of energy.
+    Cold,
+    /// Too hot: proteins denatured or stopped working.
+    Heat,
+    /// Ran out of food/energy where the temperature was fine.
+    Starvation,
+    /// Damage from reactive oxygen.
+    Oxidative,
+    /// Accumulated wear and tear.
+    OldAge,
+}
+pub const N_CAUSES: usize = 5;
+pub const CAUSE_NAMES: [&str; N_CAUSES] = ["Too cold", "Too hot", "Starvation", "Oxygen damage", "Old age"];
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Cell {
@@ -63,6 +80,12 @@ pub struct Cell {
     /// Smoothed ATP production rate per strategy (per µm² per s).
     pub atp_src: [f32; NSTRAT],
     pub growth: f32,
+    /// Damage accumulated by source since birth: aging, ROS, heat, starvation.
+    #[serde(default)]
+    pub dmg_src: [f32; 4],
+    /// Smoothed temperature suitability (1 = at optimum).
+    #[serde(default)]
+    pub thermal: f32,
     /// DNA replication progress 0..1.
     pub replication: f32,
     /// <0 when not dividing; otherwise pinch progress 0..1.
@@ -105,6 +128,8 @@ impl Cell {
             flux: [0.0; NR],
             atp_src: [0.0; NSTRAT],
             growth: 0.0,
+            dmg_src: [0.0; 4],
+            thermal: 1.0,
             replication: 0.0,
             dividing: -1.0,
             div_axis: 0.0,
@@ -303,6 +328,7 @@ impl Cell {
         }
         let t_opt = self.t_opt();
         let thermal = (-(env.temp - t_opt).powi(2) / (p.thermal_tolerance * p.thermal_tolerance)).exp();
+        self.thermal += (thermal - self.thermal) * 0.02;
         let health = (1.0 - self.damage).max(0.0);
         let tf = q10f * pace * health;
 
@@ -366,11 +392,16 @@ impl Cell {
         self.amt[chem::ROS] += (p.ros_from_o2 * c_o2 * area * pace * dt + p.ros_leak * o2_used).max(0.0);
         self.amt[chem::ROS] *= (1.0 - p.ros_decay * pace * dt).max(0.0);
         let c_ros = self.amt[chem::ROS] / area;
-        self.damage += p.ros_damage * c_ros * pace * dt;
-        self.damage += p.aging_rate * q10f * pace * dt;
+        let d_ros = p.ros_damage * c_ros * pace * dt;
+        let d_age = p.aging_rate * q10f * pace * dt;
+        self.damage += d_ros + d_age;
+        self.dmg_src[0] += d_age;
+        self.dmg_src[1] += d_ros;
         let heat_limit = t_opt + 1.5 * p.thermal_tolerance;
         if env.temp > heat_limit {
-            self.damage += p.heat_damage * (env.temp - heat_limit) / 10.0 * pace * dt;
+            let d = p.heat_damage * (env.temp - heat_limit) / 10.0 * pace * dt;
+            self.damage += d;
+            self.dmg_src[2] += d;
         }
 
         // --- Growth ------------------------------------------------------------
@@ -395,7 +426,13 @@ impl Cell {
         self.growth += (g / b - self.growth) * 0.03;
 
         // --- Maintenance, starvation, repair ----------------------------------
-        let need = p.maintenance * b * q10f * pace * dt;
+        // Upkeep is itself enzyme work: a cell that can't metabolise (wrong
+        // temperature, or out of energy) goes dormant and its upkeep drops,
+        // like the stringent response of real starving bacteria.
+        let ac = self.atp / area;
+        let activity = thermal * (ac / (ac + 0.01));
+        let upkeep = p.dormancy_floor + (1.0 - p.dormancy_floor) * activity;
+        let need = p.maintenance * b * q10f * pace * upkeep * dt;
         if self.atp >= need {
             self.atp -= need;
         } else {
@@ -408,9 +445,10 @@ impl Cell {
             self.amt[chem::NH4] += eaten * p.biomass_n;
             self.amt[chem::PO4] += eaten * p.biomass_p;
             self.damage += p.starvation_damage * pace * dt;
+            self.dmg_src[3] += p.starvation_damage * pace * dt;
         }
         if self.damage > 0.0 {
-            let rep = self.damage.min(p.repair_rate * q10f * pace * dt);
+            let rep = self.damage.min(p.repair_rate * q10f * pace * upkeep * dt);
             let cost = rep * p.repair_atp * b;
             if self.atp >= cost {
                 self.atp -= cost;
@@ -476,12 +514,28 @@ impl Cell {
         self.radius = (self.biomass / std::f32::consts::PI).sqrt();
 
         if self.damage >= 1.0 || self.biomass < p.min_size * self.genome.div_size {
-            return Fate::Die;
+            return Fate::Die(self.death_cause(env.temp));
         }
         if self.dividing >= 1.0 {
             return Fate::Divide;
         }
         Fate::Live
+    }
+
+    fn death_cause(&self, temp: f32) -> DeathCause {
+        // A cell whose enzymes barely work at the local temperature died of
+        // the temperature, whatever the final blow was.
+        if self.thermal < 0.15 {
+            return if temp < self.t_opt() { DeathCause::Cold } else { DeathCause::Heat };
+        }
+        let d = self.dmg_src;
+        let (i, _) = d.iter().enumerate().fold((3, -1.0f32), |a, (i, &v)| if v > a.1 { (i, v) } else { a });
+        match i {
+            0 => DeathCause::OldAge,
+            1 => DeathCause::Oxidative,
+            2 => DeathCause::Heat,
+            _ => DeathCause::Starvation,
+        }
     }
 
     /// Fraction of ATP currently coming from each strategy.

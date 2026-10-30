@@ -113,6 +113,7 @@ export class Inspector {
         <div class="kv" style="margin-top:8px">
           <span class="k">Growth</span><span class="v">${(c.growth * 6000).toFixed(1)}% / min</span>
           <span class="k">Temperature</span><span class="v" style="color:${tcol}">${c.temp.toFixed(1)}°C (best ${c.t_opt.toFixed(0)}°C)</span>
+          <span class="k">Enzymes working at</span><span class="v" style="color:${tcol}">${((c.thermal ?? 1) * 100).toFixed(0)}%${(c.thermal ?? 1) < 0.15 ? ' · dormant' : ''}</span>
           <span class="k">Light</span><span class="v">${(c.light * 100).toFixed(0)}%</span>
           <span class="k">Swimming</span><span class="v">${c.swim > 0.05 ? c.swim.toFixed(1) + ' µm/s' : 'no'}</span>
           <span class="k">Radius</span><span class="v">${c.radius.toFixed(2)} µm</span>

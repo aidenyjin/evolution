@@ -1,7 +1,7 @@
 //! Population statistics, history for graphs, and the discoveries log.
 //! Everything here is observation only: it never influences the simulation.
 
-use crate::cell::{Cell, NSTRAT};
+use crate::cell::{Cell, NSTRAT, N_CAUSES};
 use crate::chem::{self, NF, NR, NS_GRID};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -21,6 +21,9 @@ pub struct HistPoint {
     pub t_opt: f32,
     pub births: u64,
     pub deaths: u64,
+    /// Cumulative deaths by cause (see cell::CAUSE_NAMES).
+    #[serde(default)]
+    pub deaths_by: [u64; N_CAUSES],
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -39,6 +42,8 @@ pub struct Event {
 pub struct Stats {
     pub births: u64,
     pub deaths: u64,
+    #[serde(default)]
+    pub deaths_by: [u64; N_CAUSES],
     pub history: Vec<HistPoint>,
     pub hist_interval: f64,
     pub last_hist: f64,
@@ -67,6 +72,7 @@ impl Stats {
         Stats {
             births: 0,
             deaths: 0,
+            deaths_by: [0; N_CAUSES],
             history: Vec::new(),
             hist_interval: 1.0,
             last_hist: -1e9,
@@ -117,6 +123,7 @@ impl Stats {
             t_opt: topt / n,
             births: self.births,
             deaths: self.deaths,
+            deaths_by: self.deaths_by,
         };
         self.peak = self.peak.max(cells.len());
         while self.milestone < MILESTONES.len() && cells.len() >= MILESTONES[self.milestone] {

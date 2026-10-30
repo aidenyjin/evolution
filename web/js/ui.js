@@ -249,6 +249,9 @@ export class Graphs {
       { name: 'Births', color: [94, 230, 208], get: (p) => p.birthRate },
       { name: 'Deaths', color: [255, 107, 125], get: (p) => p.deathRate },
     ]);
+    const causeColors = [[110, 160, 255], [255, 130, 70], [200, 180, 120], [255, 90, 140], [150, 150, 170]];
+    const causes = new Chart(this.el, { title: 'Deaths by cause', sub: 'per simulated minute', stacked: true });
+    causes.setSeries((info.death_causes || []).map((name, k) => ({ name, color: causeColors[k] || [180, 180, 180], get: (p) => (p.causeRate ? p.causeRate[k] : 0) })));
     const sp = info.species;
     const chemIdx = [1, 2, 3, 4, 5, 6, 9, 7, 8, 0];
     const chemColors = (i) => sp[i].color;
@@ -265,7 +268,7 @@ export class Graphs {
     size.setSeries([{ name: 'Size', color: [94, 230, 208], get: (p) => p.size }]);
     const gen = new Chart(this.el, { title: 'Generations', sub: 'longest line of descent', height: 110 });
     gen.setSeries([{ name: 'Generation', color: [255, 210, 122], get: (p) => p.max_gen }]);
-    this.charts = [pop, rates, chem, genes, lin, topt, size, gen];
+    this.charts = [pop, rates, causes, chem, genes, lin, topt, size, gen];
   }
 
   setHistory(hist) {
@@ -280,12 +283,23 @@ export class Graphs {
     }
     // Rates per sample are noisy: show a centred moving average.
     const win = 6;
+    const nc = hist.length && hist[0].deaths_by ? hist[0].deaths_by.length : 0;
+    const raw = hist.map((p, i) => {
+      if (i === 0 || !nc) return new Array(nc).fill(0);
+      const q = hist[i - 1], dt = Math.max(1e-6, p.t - q.t) / 60;
+      return p.deaths_by.map((v, k) => Math.max(0, (v - q.deaths_by[k]) / dt));
+    });
     const br = hist.map((p) => p.birthRate), dr = hist.map((p) => p.deathRate);
     for (let i = 0; i < hist.length; i++) {
       let sb = 0, sd = 0, n = 0;
-      for (let j = Math.max(1, i - win); j <= Math.min(hist.length - 1, i + win); j++) { sb += br[j]; sd += dr[j]; n++; }
+      const sc = new Array(nc).fill(0);
+      for (let j = Math.max(1, i - win); j <= Math.min(hist.length - 1, i + win); j++) {
+        sb += br[j]; sd += dr[j]; n++;
+        for (let k = 0; k < nc; k++) sc[k] += raw[j][k];
+      }
       hist[i].birthRate = n ? sb / n : 0;
       hist[i].deathRate = n ? sd / n : 0;
+      hist[i].causeRate = sc.map((v) => (n ? v / n : 0));
     }
     this.hist = hist;
     this.dirty = true;

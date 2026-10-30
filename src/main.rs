@@ -92,6 +92,8 @@ fn headless(params: Params, seed: u64, steps: u64) {
             let s: Vec<String> = l.strat.iter().map(|v| v.to_string()).collect();
             let c: Vec<String> = l.chem.iter().map(|v| format!("{:.0}", v)).collect();
             println!("         strategies=[{}] chem=[{}]", s.join(","), c.join(","));
+            let causes: Vec<String> = cell::CAUSE_NAMES.iter().zip(l.deaths_by.iter()).map(|(n, v)| format!("{n}: {v}")).collect();
+            println!("         deaths by cause: {}", causes.join(", "));
             for e in w.stats.events.iter().filter(|e| e.seq > seen_events) {
                 println!("  EVENT t={:.0}s {}", e.t, e.text);
             }

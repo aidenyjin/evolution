@@ -324,17 +324,18 @@ out vec4 o;
 float hash(float n) { return fract(sin(n) * 43758.5453); }
 void main() {
   float t = f_b.w;                 // 0..1 age
-  float rr = 1. + t * 1.6;
+  float rr = 1. + t * 1.2;
   float d = length(v_p);
-  float ring = smoothstep(.12, 0., abs(d - rr)) * (1. - t) * .7;
+  float fade = (1. - t) * (1. - t);
+  float ring = smoothstep(.08, 0., abs(d - rr)) * fade * .35;
   float a = ring;
   vec3 c = mix(f_c, vec3(1.), .4) * ring;
   for (int k = 0; k < 7; k++) {
     float an = hash(float(k) * 12.9 + f_b.x) * 6.283;
     vec2 dp = vec2(cos(an), sin(an)) * (.4 + t * (1.4 + hash(float(k) + f_b.y) * 1.2));
-    float fd = length(v_p - dp) - .1 * (1. - t);
-    float f = smoothstep(.05, -.02, fd) * (1. - t);
-    c += f_c * f * .8; a += f * .6;
+    float fd = length(v_p - dp) - .08 * (1. - t);
+    float f = smoothstep(.05, -.02, fd) * fade;
+    c += f_c * f * .5; a += f * .35;
   }
   o = vec4(c, clamp(a, 0., 1.));
 }`;
@@ -395,6 +396,7 @@ export class Renderer {
     this.wavePeriod = 7;
     this.detail = true;
     this.particlesOn = true;
+    this.burstsOn = true;
     this.overlay = null; // {ramp, color}
     this.bursts = [];
     this.instances = new Float32Array(FLOATS * 1024);
@@ -535,6 +537,7 @@ export class Renderer {
   }
 
   addBursts(deaths) {
+    if (!this.burstsOn) return;
     const now = this.time;
     for (const d of deaths) {
       if (this.bursts.length > 600) break;

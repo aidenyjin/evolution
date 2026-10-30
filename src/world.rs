@@ -725,10 +725,11 @@ impl World {
         for i in (0..n).rev() {
             match fates[i] {
                 Fate::Live => {}
-                Fate::Die => {
+                Fate::Die(cause) => {
                     let c = self.cells.swap_remove(i);
                     self.lyse(&c);
                     self.stats.deaths += 1;
+                    self.stats.deaths_by[cause as usize] += 1;
                 }
                 Fate::Divide => {
                     let c = self.cells.swap_remove(i);
@@ -795,6 +796,7 @@ impl World {
             d.cap = c.cap;
             d.atp_src = c.atp_src;
             d.growth = c.growth;
+            d.thermal = c.thermal;
             d.heading = c.heading + sign * 0.6;
             d.vx = c.vx;
             d.vy = c.vy;
