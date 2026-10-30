@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Primordia</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='%2309202f' stroke='%235ee6d0' stroke-width='2.5'/%3E%3Ccircle cx='13' cy='14' r='4' fill='%235ee6d0' opacity='.55'/%3E%3C/svg%3E">
+</head>
+<body>
+  <canvas id="world"></canvas>
+
+  <header id="topbar" class="glass">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" class="logo" aria-hidden="true">
+        <circle cx="16" cy="16" r="12" class="logo-membrane"/>
+        <circle cx="13" cy="14" r="4.2" class="logo-nucleoid"/>
+        <circle cx="20.5" cy="19" r="1.6" class="logo-granule"/>
+      </svg>
+      <span class="brand-name">Primordia</span>
+    </div>
+
+    <div class="transport">
+      <button id="btn-play" class="icon-btn" title="Pause / resume (Space)">
+        <svg viewBox="0 0 24 24" class="ic-pause"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+        <svg viewBox="0 0 24 24" class="ic-play"><path d="M7 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L8.5 4.64A1 1 0 0 0 7 5.5z"/></svg>
+      </button>
+      <button id="btn-step" class="icon-btn" title="Advance one frame (.)">
+        <svg viewBox="0 0 24 24"><path d="M6 5.5v13a1 1 0 0 0 1.5.86l8.5-5.3V18a1 1 0 0 0 2 0V6a1 1 0 0 0-2 0v3.94L7.5 4.64A1 1 0 0 0 6 5.5z"/></svg>
+      </button>
+      <div class="segmented" id="speed-seg" role="radiogroup" aria-label="Simulation speed">
+        <button data-speed="1" title="Real time: every step is drawn (1)">Real time</button>
+        <button data-speed="5" title="Simulate 5 steps per drawn frame (2)">Every 5th</button>
+        <button data-speed="custom" title="Choose how many steps per drawn frame (3)">Every <input id="speed-n" type="number" min="2" max="1000" value="20"><span class="suffix">th</span></button>
+        <button data-speed="max" title="As fast as your computer can go (4)">Max</button>
+      </div>
+    </div>
+
+    <div class="readouts">
+      <div class="readout"><span class="label">Simulated</span><span class="value mono" id="ro-time">0:00</span></div>
+      <div class="readout"><span class="label">Speed</span><span class="value mono" id="ro-speed">—</span></div>
+      <div class="readout"><span class="label">Cells</span><span class="value mono" id="ro-pop">0</span></div>
+      <div class="readout"><span class="label">Generation</span><span class="value mono" id="ro-gen">0</span></div>
+      <div class="readout"><span class="label">Lineages</span><span class="value mono" id="ro-lin">0</span></div>
+    </div>
+
+    <div class="world-actions">
+      <button id="btn-new" class="btn" title="Start a new world">New world</button>
+      <button id="btn-save" class="btn" title="Save this world to disk">Save</button>
+      <button id="btn-load" class="btn" title="Load a saved world">Load</button>
+    </div>
+  </header>
+
+  <aside id="viewpanel" class="glass panel-left">
+    <section>
+      <h3>Overlay</h3>
+      <select id="overlay" aria-label="Overlay"></select>
+      <div id="overlay-legend" class="legend-bar hidden">
+        <div class="ramp" id="overlay-ramp"></div>
+        <div class="legend-labels"><span id="ov-min">0</span><span id="ov-max">—</span></div>
+      </div>
+    </section>
+    <section>
+      <h3>Colour cells by</h3>
+      <select id="colormode" aria-label="Cell colouring">
+        <option value="strategy">How they make energy</option>
+        <option value="lineage">Lineage (relatedness)</option>
+        <option value="energy">Energy level (ATP)</option>
+        <option value="damage">Damage</option>
+        <option value="genes">Genome size</option>
+      </select>
+      <div id="color-legend" class="legend-list"></div>
+    </section>
+    <section class="toggles">
+      <label class="toggle"><input type="checkbox" id="tg-particles" checked><span>Drifting particles</span></label>
+      <label class="toggle"><input type="checkbox" id="tg-zones" checked><span>Zone labels</span></label>
+      <label class="toggle"><input type="checkbox" id="tg-flagella" checked><span>Flagella &amp; detail</span></label>
+    </section>
+  </aside>
+
+  <button id="panel-toggle" title="Hide / show the side panel (P)">›</button>
+  <aside id="sidepanel" class="glass panel-right">
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="cell">Cell</button>
+      <button class="tab" data-tab="graphs">Graphs</button>
+      <button class="tab" data-tab="events">Discoveries <span id="events-badge" class="badge hidden">0</span></button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+    <div class="tab-body" id="tab-cell"></div>
+    <div class="tab-body hidden" id="tab-graphs"></div>
+    <div class="tab-body hidden" id="tab-events"></div>
+    <div class="tab-body hidden" id="tab-settings"></div>
+  </aside>
+
+  <div id="hud-bottom">
+    <div id="scalebar"><div class="bar"></div><span class="mono" id="scalebar-label">100 µm</span></div>
+    <div id="cursor-readout" class="mono glass-lite"></div>
+  </div>
+  <canvas id="minimap" class="glass" width="240" height="150" title="Click to jump"></canvas>
+  <div id="zone-labels"></div>
+  <div id="tooltip" class="glass-lite hidden"></div>
+  <div id="toasts"></div>
+  <div id="connection" class="hidden"><div class="glass conn-card"><div class="spinner"></div><span id="conn-text">Connecting to simulation…</span></div></div>
+
+  <dialog id="dlg-new" class="glass dialog">
+    <form method="dialog">
+      <h2>New world</h2>
+      <p class="muted">Starts over from the ancestral cell (LUCA) with the current settings. Settings marked <span class="pill">new world</span> take effect now.</p>
+      <label class="field"><span>Seed</span><input id="new-seed" type="number" min="0" placeholder="random"></label>
+      <div class="dialog-actions"><button value="cancel" class="btn">Cancel</button><button value="ok" class="btn primary">Create</button></div>
+    </form>
+  </dialog>
+  <dialog id="dlg-save" class="glass dialog">
+    <form method="dialog">
+      <h2>Save world</h2>
+      <p class="muted">Saved into the <code>saves/</code> folder next to where you started Primordia.</p>
+      <label class="field"><span>Name</span><input id="save-name" type="text" maxlength="60" placeholder="my-world"></label>
+      <div class="dialog-actions"><button value="cancel" class="btn">Cancel</button><button value="ok" class="btn primary">Save</button></div>
+    </form>
+  </dialog>
+  <dialog id="dlg-load" class="glass dialog">
+    <form method="dialog">
+      <h2>Load world</h2>
+      <div id="save-list" class="save-list"></div>
+      <div class="dialog-actions"><button value="cancel" class="btn">Close</button></div>
+    </form>
+  </dialog>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
