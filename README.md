@@ -16,11 +16,25 @@ temperature preference, gene regulation) evolves.
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    ```
 
-2. From this folder:
+2. Download the code (this also installs Apple's command line tools if
+   macOS asks, which Rust needs too):
+
+   ```bash
+   git clone -b claude/adoring-cray-254z6c https://github.com/aidenyjin/evolution.git
+   ```
+
+3. Go into the folder and run it:
+
+   ```bash
+   cd evolution
+   ```
 
    ```bash
    cargo run --release
    ```
+
+   `cargo` has to be run inside the folder that contains `Cargo.toml`,
+   otherwise it reports "could not find Cargo.toml".
 
 The first build takes a minute or two. Primordia then opens
 `http://localhost:4747` in your browser (Safari, Chrome and Firefox all work).
