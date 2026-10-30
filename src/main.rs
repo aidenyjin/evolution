@@ -94,6 +94,22 @@ fn headless(params: Params, seed: u64, steps: u64) {
             println!("         strategies=[{}] chem=[{}]", s.join(","), c.join(","));
             let causes: Vec<String> = cell::CAUSE_NAMES.iter().zip(l.deaths_by.iter()).map(|(n, v)| format!("{n}: {v}")).collect();
             println!("         deaths by cause: {}", causes.join(", "));
+            if !w.cells.is_empty() {
+                let pct = |mut v: Vec<f32>| -> String {
+                    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let q = |f: f32| v[((v.len() - 1) as f32 * f) as usize];
+                    format!("{:.1}/{:.1}/{:.1}", q(0.05), q(0.5), q(0.95))
+                };
+                let topt: Vec<f32> = w.cells.iter().map(|c| c.t_opt()).collect();
+                let temp: Vec<f32> = w.cells.iter().map(|c| w.temp_at(c.gi as usize)).collect();
+                let active: Vec<f32> = w.cells.iter().filter(|c| c.thermal > 0.3).map(|c| w.temp_at(c.gi as usize)).collect();
+                println!(
+                    "         T_opt p5/50/95 = {} °C | lives at {} °C | active cells live at {} °C",
+                    pct(topt),
+                    pct(temp),
+                    if active.is_empty() { "-".to_string() } else { pct(active) }
+                );
+            }
             for e in w.stats.events.iter().filter(|e| e.seq > seen_events) {
                 println!("  EVENT t={:.0}s {}", e.t, e.text);
             }
