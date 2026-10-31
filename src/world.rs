@@ -26,6 +26,61 @@ pub struct Vent {
     pub cells: Vec<(u32, f32)>,
     #[serde(default)]
     pub output: f32,
+    /// Seconds since the vent opened, and how long it will last (0 = forever).
+    #[serde(default)]
+    pub age: f32,
+    #[serde(default)]
+    pub life: f32,
+}
+
+impl Vent {
+    /// 0..1 activity over the vent's life: it warms up after opening and
+    /// fades away before going extinct.
+    pub fn envelope(&self) -> f32 {
+        if self.life <= 0.0 {
+            return 1.0;
+        }
+        let fade = (self.life * 0.25).clamp(30.0, 300.0);
+        smoothstep(0.0, 90.0, self.age) * (1.0 - smoothstep(self.life - fade, self.life, self.age))
+    }
+}
+
+/// Grid cells a vent at (x, y) releases into, with weights summing to 1.
+fn vent_cells(x: f32, y: f32, r: f32, dx: f32, gw: usize, gh: usize) -> Vec<(u32, f32)> {
+    let mut cells = Vec::new();
+    let (gx0, gx1) = (((x - 3.0 * r) / dx).floor().max(0.0) as usize, (((x + 3.0 * r) / dx).ceil() as usize).min(gw - 1));
+    let (gy0, gy1) = (((y - 3.0 * r) / dx).floor().max(0.0) as usize, (((y + 3.0 * r) / dx).ceil() as usize).min(gh - 1));
+    let mut total = 0.0;
+    for gy in gy0..=gy1 {
+        for gx in gx0..=gx1 {
+            let cx = (gx as f32 + 0.5) * dx;
+            let cy = (gy as f32 + 0.5) * dx;
+            let d2 = (cx - x).powi(2) + (cy - y).powi(2);
+            let wgt = (-d2 / (2.0 * r * r)).exp();
+            if wgt > 0.01 {
+                cells.push(((gy * gw + gx) as u32, wgt));
+                total += wgt;
+            }
+        }
+    }
+    for c in cells.iter_mut() {
+        c.1 /= total.max(1e-6);
+    }
+    cells
+}
+
+/// A random spot in the deep zone, away from existing vents.
+fn pick_vent_site(rng: &mut Rng, vents: &[Vent], p: &Params, w: f32, h: f32) -> Option<(f32, f32)> {
+    let nv = p.vent_count.max(1.0);
+    let min_sep = (w * p.deep_end * h / nv).sqrt() * 0.55;
+    for _ in 0..2000 {
+        let x = rng.range(0.07 * w, (p.deep_end - 0.025).max(0.1) * w);
+        let y = rng.range(0.08 * h, 0.92 * h);
+        if !vents.iter().any(|v| ((v.x - x).powi(2) + (v.y - y).powi(2)).sqrt() < min_sep) {
+            return Some((x, y));
+        }
+    }
+    None
 }
 
 #[derive(Clone, Copy)]
@@ -68,6 +123,12 @@ pub struct World {
     /// 0..1 closeness to the nearest vent (heat).
     pub vent_heat: Vec<f32>,
     pub vents: Vec<Vent>,
+    /// Phases of the slow climate cycle.
+    #[serde(default)]
+    pub climate_phase: [f32; 2],
+    /// Current ocean temperature offset from the climate cycle (°C).
+    #[serde(skip)]
+    pub climate_now: f32,
     /// Water velocity per grid cell (µm/s).
     pub flow: Vec<[f32; 2]>,
     flow_modes: Vec<[f32; 5]>,
@@ -145,61 +206,25 @@ impl World {
             }
         }
 
-        // Vents, scattered through the deep with a minimum spacing.
+        // Vents, scattered through the deep with a minimum spacing. Their
+        // lifetimes are staggered so they don't all die at once.
         let mut vents: Vec<Vent> = Vec::new();
         let nv = p.vent_count as usize;
-        let mut tries = 0;
-        while vents.len() < nv && tries < 5000 {
-            tries += 1;
-            let x = rng.range(0.07 * w, (p.deep_end - 0.025).max(0.1) * w);
-            let y = rng.range(0.08 * h, 0.92 * h);
-            let min_sep = (w * p.deep_end * h / nv.max(1) as f32).sqrt() * 0.55;
-            if vents.iter().any(|v| ((v.x - x).powi(2) + (v.y - y).powi(2)).sqrt() < min_sep) {
-                continue;
-            }
-            let mut cells = Vec::new();
-            let r = p.vent_radius;
-            let (gx0, gx1) = (((x - 3.0 * r) / dx).floor().max(0.0) as usize, (((x + 3.0 * r) / dx).ceil() as usize).min(gw - 1));
-            let (gy0, gy1) = (((y - 3.0 * r) / dx).floor().max(0.0) as usize, (((y + 3.0 * r) / dx).ceil() as usize).min(gh - 1));
-            let mut total = 0.0;
-            for gy in gy0..=gy1 {
-                for gx in gx0..=gx1 {
-                    let cx = (gx as f32 + 0.5) * dx;
-                    let cy = (gy as f32 + 0.5) * dx;
-                    let d2 = (cx - x).powi(2) + (cy - y).powi(2);
-                    let wgt = (-d2 / (2.0 * r * r)).exp();
-                    if wgt > 0.01 {
-                        cells.push(((gy * gw + gx) as u32, wgt));
-                        total += wgt;
-                    }
-                }
-            }
-            for c in cells.iter_mut() {
-                c.1 /= total;
-            }
+        while vents.len() < nv {
+            let Some((x, y)) = pick_vent_site(&mut rng, &vents, &p, w, h) else { break };
+            let life = if p.vent_lifetime > 0.0 { p.vent_lifetime * rng.range(0.7, 1.3) } else { 0.0 };
             vents.push(Vent {
                 x,
                 y,
                 phase: [rng.range(0.0, TAU), rng.range(0.0, TAU)],
                 strength: rng.range(0.7, 1.3),
-                cells,
+                cells: vent_cells(x, y, p.vent_radius, dx, gw, gh),
                 output: 1.0,
+                age: if life > 0.0 { rng.range(100.0, 0.6 * life) } else { 0.0 },
+                life,
             });
         }
-        let mut vent_heat = vec![0.0f32; n];
-        let hr = p.vent_heat_radius;
-        for gy in 0..gh {
-            for gx in 0..gw {
-                let cx = (gx as f32 + 0.5) * dx;
-                let cy = (gy as f32 + 0.5) * dx;
-                let mut m = 0.0f32;
-                for v in &vents {
-                    let d2 = (cx - v.x).powi(2) + (cy - v.y).powi(2);
-                    m = m.max(v.strength.min(1.0) * (-d2 / (2.0 * hr * hr)).exp());
-                }
-                vent_heat[gy * gw + gx] = m;
-            }
-        }
+        let vent_heat = vec![0.0f32; n];
 
         let mut flow_modes = Vec::new();
         for _ in 0..5 {
@@ -222,6 +247,8 @@ impl World {
             zone,
             vent_heat,
             vents,
+            climate_phase: [0.0, 0.0],
+            climate_now: 0.0,
             flow: vec![[0.0; 2]; n],
             flow_modes,
             surf: Vec::new(),
@@ -238,12 +265,14 @@ impl World {
             chem: None,
             scratch: Scratch::default(),
         };
+        world.climate_phase = [world.rng.range(0.0, TAU), world.rng.range(0.0, TAU)];
         world.rebuild();
+        world.update_vent_heat();
         world.init_chemistry();
         world.spawn_luca();
         world.stats.seed_discoveries(&world.cells);
         world.update_flow();
-        world.stats.record(&world.cells, &world.grid, world.dx, world.time, true);
+        world.stats.record(&world.cells, &world.grid, world.dx, world.time, 0.0, true);
         world
     }
 
@@ -338,8 +367,122 @@ impl World {
     pub fn temp_at(&self, gi: usize) -> f32 {
         let z = self.zone[gi];
         let p = &self.params;
-        let base = z[0] * p.temp_deep + z[1] * p.temp_shallow + z[2] * p.temp_beach;
+        let base = z[0] * p.temp_deep + z[1] * p.temp_shallow + z[2] * p.temp_beach + self.climate_now;
         base + self.vent_heat[gi] * (p.vent_temp - base)
+    }
+
+    /// Ocean temperature offset from the slow climate cycle.
+    pub fn climate_offset(&self, t: f64) -> f32 {
+        let p = &self.params;
+        if p.climate_amplitude <= 0.0 {
+            return 0.0;
+        }
+        let ph = (t as f32) * TAU / p.climate_period.max(1.0);
+        p.climate_amplitude * (0.72 * (ph + self.climate_phase[0]).sin() + 0.28 * (ph * 2.7 + self.climate_phase[1]).sin())
+    }
+
+    /// Recompute the vent heat field from each vent's current activity.
+    pub fn update_vent_heat(&mut self) {
+        let (gw, gh, dx) = (self.gw, self.gh, self.dx);
+        let hr = self.params.vent_heat_radius;
+        self.vent_heat.iter_mut().for_each(|v| *v = 0.0);
+        for v in &self.vents {
+            let a = v.strength.min(1.0) * v.envelope();
+            if a < 1e-3 {
+                continue;
+            }
+            let reach = 4.0 * hr;
+            let (gx0, gx1) = (((v.x - reach) / dx).floor().max(0.0) as usize, (((v.x + reach) / dx).ceil() as usize).min(gw - 1));
+            let (gy0, gy1) = (((v.y - reach) / dx).floor().max(0.0) as usize, (((v.y + reach) / dx).ceil() as usize).min(gh - 1));
+            for gy in gy0..=gy1 {
+                for gx in gx0..=gx1 {
+                    let cx = (gx as f32 + 0.5) * dx;
+                    let cy = (gy as f32 + 0.5) * dx;
+                    let d2 = (cx - v.x).powi(2) + (cy - v.y).powi(2);
+                    let hv = a * (-d2 / (2.0 * hr * hr)).exp();
+                    let gi = gy * gw + gx;
+                    if hv > self.vent_heat[gi] {
+                        self.vent_heat[gi] = hv;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Age vents. As a vent starts to fade, a successor opens nearby along
+    /// the same seafloor fissure, so nearby life has somewhere to go; the
+    /// old vent disappears when it dies.
+    fn update_vents(&mut self, dt: f32) {
+        if self.params.vent_lifetime <= 0.0 {
+            for v in self.vents.iter_mut() {
+                v.life = 0.0;
+            }
+            return;
+        }
+        let mut spawn_near = Vec::new();
+        for (i, v) in self.vents.iter_mut().enumerate() {
+            if v.life <= 0.0 {
+                v.life = self.params.vent_lifetime * self.rng.range(0.7, 1.3);
+                v.age = v.age.min(v.life * 0.5);
+            }
+            let fade_start = v.life - (v.life * 0.25).clamp(30.0, 300.0);
+            if v.age < fade_start && v.age + dt >= fade_start {
+                spawn_near.push(i);
+            }
+            v.age += dt;
+        }
+        for i in spawn_near {
+            if self.vents.len() >= 24 {
+                break;
+            }
+            let (ox, oy) = (self.vents[i].x, self.vents[i].y);
+            let p = self.params.clone();
+            let (x0, x1) = (0.05 * self.w, (p.deep_end - 0.02).max(0.08) * self.w);
+            let mut site = None;
+            for _ in 0..200 {
+                let a = self.rng.range(0.0, TAU);
+                let d = self.rng.range(50.0, 110.0);
+                let (x, y) = (ox + a.cos() * d, oy + a.sin() * d);
+                let clear = self.vents.iter().enumerate().all(|(j, v)| j == i || ((v.x - x).powi(2) + (v.y - y).powi(2)).sqrt() > 60.0);
+                if x > x0 && x < x1 && y > 0.06 * self.h && y < 0.94 * self.h && clear {
+                    site = Some((x, y));
+                    break;
+                }
+            }
+            let (x, y) = site.or_else(|| pick_vent_site(&mut self.rng, &self.vents, &p, self.w, self.h)).unwrap_or((ox, oy));
+            self.vents.push(Vent {
+                x,
+                y,
+                phase: [self.rng.range(0.0, TAU), self.rng.range(0.0, TAU)],
+                strength: self.rng.range(0.7, 1.3),
+                cells: vent_cells(x, y, p.vent_radius, self.dx, self.gw, self.gh),
+                output: 0.0,
+                age: 0.0,
+                life: p.vent_lifetime * self.rng.range(0.7, 1.3),
+            });
+            let text = format!("Vent at ({:.0}, {:.0}) µm is fading; a new one is opening nearby at ({:.0}, {:.0}) µm", ox, oy, x, y);
+            self.stats.push_event(self.time, self.step, "environment", text, None, x, y);
+        }
+        let before = self.vents.len();
+        self.vents.retain(|v| v.age < v.life);
+        // Keep the count steady if something removed vents without successors.
+        let target = self.params.vent_count as usize;
+        if self.vents.len() < before {
+            while self.vents.len() < target.min(24) {
+                let p = self.params.clone();
+                let Some((x, y)) = pick_vent_site(&mut self.rng, &self.vents, &p, self.w, self.h) else { break };
+                self.vents.push(Vent {
+                    x,
+                    y,
+                    phase: [self.rng.range(0.0, TAU), self.rng.range(0.0, TAU)],
+                    strength: self.rng.range(0.7, 1.3),
+                    cells: vent_cells(x, y, p.vent_radius, self.dx, self.gw, self.gh),
+                    output: 0.0,
+                    age: 0.0,
+                    life: p.vent_lifetime * self.rng.range(0.7, 1.3),
+                });
+            }
+        }
     }
 
     fn update_flow(&mut self) {
@@ -456,7 +599,9 @@ impl World {
     pub fn step(&mut self) {
         if self.step % 30 == 0 {
             self.update_flow();
+            self.update_vent_heat();
         }
+        self.climate_now = self.climate_offset(self.time);
         let t0 = std::time::Instant::now();
         self.physics();
         let t1 = std::time::Instant::now();
@@ -464,6 +609,7 @@ impl World {
         let t2 = std::time::Instant::now();
         // The chemistry grid advances every other step with a double step.
         if self.step % 2 == 1 {
+            self.update_vents(2.0 * DT);
             self.grid_step(2.0 * DT, false);
         }
         let t3 = std::time::Instant::now();
@@ -473,7 +619,7 @@ impl World {
         self.step += 1;
         self.time += DT as f64;
         if self.step % 30 == 0 {
-            self.stats.record(&self.cells, &self.grid, self.dx, self.time, false);
+            self.stats.record(&self.cells, &self.grid, self.dx, self.time, self.climate_now, false);
             let events = self.stats.check_discoveries(&self.cells, self.time, self.step);
             let _ = events;
         }
@@ -528,9 +674,10 @@ impl World {
         let dirs = shape_dirs();
         let zone = &self.zone;
         let vent_heat = &self.vent_heat;
+        let climate = self.climate_now;
         let temp_of = |gi: usize| {
             let z = zone[gi];
-            let base = z[0] * p.temp_deep + z[1] * p.temp_shallow + z[2] * p.temp_beach;
+            let base = z[0] * p.temp_deep + z[1] * p.temp_shallow + z[2] * p.temp_beach + climate;
             base + vent_heat[gi] * (p.vent_temp - base)
         };
 
@@ -540,6 +687,8 @@ impl World {
             let [x, y, r] = pos[i];
             let mut mx = 0.0f32;
             let mut my = 0.0f32;
+            let mut squeeze = 0.0f32;
+            let mut contacts = 0u32;
             let mut caps = [f32::MAX; SHAPE_N];
             let bx = ((x / cs) as usize).min(nx - 1);
             let by = ((y / cs) as usize).min(ny - 1);
@@ -564,6 +713,8 @@ impl World {
                         let push = (rr - d) * 0.5 * p.collision_stiffness;
                         mx += nxv * push;
                         my += nyv * push;
+                        squeeze += (rr - d) / r.max(0.3);
+                        contacts += 1;
                         // Membranes flatten against each other at the contact.
                         let pd = d / rr;
                         for (kk, &(cx, cy)) in dirs.iter().enumerate() {
@@ -575,6 +726,20 @@ impl World {
                     }
                 }
             }
+            // Average pushes from many neighbours and cap the step, so packed
+            // cells settle instead of jittering.
+            if contacts > 1 {
+                let k = 1.0 / (0.5 * contacts as f32).max(1.0);
+                mx *= k;
+                my *= k;
+            }
+            let mlen = (mx * mx + my * my).sqrt();
+            let mcap = 0.3 * r;
+            if mlen > mcap {
+                mx *= mcap / mlen;
+                my *= mcap / mlen;
+            }
+            c.pressure += (squeeze - c.pressure) * 0.1;
             let mut f = Self::sample_flow(flow, x, y, dx, gw, gh);
             let gi = grid_index(x, y, dx, gw, gh) as usize;
             f[0] += Self::wave_u(surf, col_sc, gi, gi % gw, wt);
@@ -656,10 +821,11 @@ impl World {
             let zone = &self.zone;
             let vent_heat = &self.vent_heat;
             let grid = &self.grid;
+            let climate = self.climate_now;
             self.cells.par_iter().zip(envs.par_iter_mut()).zip(xfer.par_iter_mut()).for_each(|((c, e), x)| {
                 let gi = c.gi as usize;
                 let z = zone[gi];
-                let base = z[0] * p.temp_deep + z[1] * p.temp_shallow + z[2] * p.temp_beach;
+                let base = z[0] * p.temp_deep + z[1] * p.temp_shallow + z[2] * p.temp_beach + climate;
                 e.temp = base + vent_heat[gi] * (p.vent_temp - base);
                 e.light = (z[0] * p.light_deep + z[1] * p.light_shallow + z[2] * p.light_beach) * day;
                 for s in 0..NS_GRID {
@@ -829,7 +995,7 @@ impl World {
         for v in self.vents.iter_mut() {
             let ph0 = t * TAU / p.vent_period + v.phase[0];
             let ph1 = t * TAU / (0.37 * p.vent_period) + v.phase[1];
-            let out = (v.strength * (1.0 + p.vent_variability * (0.65 * ph0.sin() + 0.35 * ph1.sin()))).max(0.0);
+            let out = (v.strength * v.envelope() * (1.0 + p.vent_variability * (0.65 * ph0.sin() + 0.35 * ph1.sin()))).max(0.0);
             v.output = out;
             for &(gi, wgt) in &v.cells {
                 let gi = gi as usize;
@@ -918,6 +1084,10 @@ impl World {
                 chem::NH4 => (0..n).for_each(|i| g[i] += (nh4_t[i] - g[i]) * mk),
                 chem::PO4 => (0..n).for_each(|i| g[i] += (po4_t[i] - g[i]) * mk),
                 chem::SO4 => (0..n).for_each(|i| g[i] += (p.so4_background - g[i]) * mk * 0.5),
+                chem::SUGAR | chem::ACETATE | chem::DOM => {
+                    let k = 1.0 - (p.organic_washout * dt).min(1.0);
+                    g.iter_mut().for_each(|v| *v *= k);
+                }
                 _ => {}
             }
         });

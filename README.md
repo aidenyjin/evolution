@@ -92,7 +92,15 @@ up while keeping all the ratios.
     land runoff, but waves surge back and forth over it.
 - **Water.** Dissolved chemicals diffuse and are carried by slow currents and
   waves. Gases exchange with the atmosphere, and minerals are slowly
-  resupplied.
+  resupplied. Dissolved organics (sugar, acetate, dead-cell matter) slowly
+  wash out into the wider ocean, so food can't pile up forever. Phosphate is
+  scarce, which is what limits life in real oceans too.
+- **A changing environment.** Nothing stays put for long, which keeps
+  evolution moving:
+  - **Vents age and die.** As one fades, a new one opens nearby along the
+    same seafloor fissure. Life has to follow it or perish.
+  - **The climate drifts.** Ocean temperatures slowly swing warmer and colder
+    over a long cycle.
 - **Chemistry.** There are 10 dissolved species plus reactive oxygen inside
   cells, and 14 possible reactions. The energy each reaction releases is
   derived from real formation free energies (ΔGf), so evolution can't find a
@@ -103,6 +111,10 @@ up while keeping all the ratios.
     they stop pushing.
   - **Brownian motion** from the Stokes–Einstein relation.
   - **Soft membranes** that flatten where cells touch.
+  - **Crowding.** Cells squeezed by their neighbours stop growing, as real
+    bacteria under mechanical pressure do.
+  - **Dormancy.** Cells that can't metabolise (too cold, too hot, or out of
+    energy) slow their upkeep and wait, instead of starving at once.
   - **Membrane permeability.** Gases cross membranes on their own; ions and
     sugars need transporter proteins.
 - **The genetic code.**
@@ -129,11 +141,19 @@ up while keeping all the ratios.
 - **Universal machinery settings,** such as ribosome level and division size.
 
 The ancestor follows what genetic studies suggest about the real LUCA. It's an
-anaerobic vent-dweller that makes ATP from 4 H₂ + 2 CO₂ → acetate, fixes carbon
-with H₂, and imports ammonium and phosphate. Everything after that has to be
-discovered, including fermentation, sulfate reduction, photosynthesis,
-oxygen-making photosynthesis, and respiration once oxygen exists.
-Discoveries are logged in the **Discoveries** tab as they happen.
+anaerobic, heat-loving vent-dweller (its enzymes work best around 56 °C) that
+makes ATP from 4 H₂ + 2 CO₂ → acetate, fixes carbon with H₂, and imports
+ammonium and phosphate. Like early enzymes are thought to have been, its
+proteins are sloppy generalists, only about half as good as they could be,
+so evolution has room to improve them from the start.
+
+Everything after that has to be discovered: cooler temperature preferences,
+better enzymes where speed actually matters (cells starved of hydrogen are
+limited by how fast it reaches them, not by enzyme speed), fermentation, sulfate reduction, photosynthesis,
+oxygen-making photosynthesis, and respiration once oxygen exists. In testing,
+most worlds evolve several new abilities within the first simulated hour,
+and oxygen-making photosynthesis often appears in that time too. Discoveries,
+vent changes and your own edits are logged in the **Discoveries** tab.
 
 ## Science-y views
 
@@ -142,8 +162,9 @@ Discoveries are logged in the **Discoveries** tab as they happen.
 - **Cell colours.** By energy source, by lineage (colours drift slightly with
   each mutation, so relatives look alike), by ATP level, by damage, or by
   genome size.
-- **Graphs.** Population by energy source, births and deaths, world chemistry
-  (log scale), genome size, surviving lineages, temperature preference, and
+- **Graphs.** Population by energy source, births and deaths, deaths by cause,
+  enzyme quality, world chemistry (log scale), genome size, surviving
+  lineages, temperature preference vs. water temperature, cell size and
   generations.
 - **Inspector.**
   - Each gene's protein with its best function and side activities, plus its
@@ -152,12 +173,35 @@ Discoveries are logged in the **Discoveries** tab as they happen.
   - The full codon sequence.
   - A plot of where the cell's proteins sit in shape space.
 
+## Cell editor
+
+The **Editor** tab lets you design new cells and place them in the world, or
+rewrite a living cell. Since traits come from genes, you edit genes and the
+simulation works out what each protein does.
+
+- **Start from** LUCA, a blank cell, or a copy of the selected cell, or edit
+  the selected cell directly (also via **Edit** in the Cell tab).
+- **Add a gene by function.** Pick a job (any reaction, transporter, motor or
+  regulator), a temperature preference, a length and a location. The editor
+  searches for DNA whose protein folds into that function. You'll see its
+  real activity and side activities.
+- **Edit DNA directly.** Every gene's codons are editable, with a live preview
+  of what the protein becomes. You can also edit its expression level and its
+  regulator binding site, duplicate it, redesign it, or remove it.
+- **Everything else:** ribosome level, division size, lineage colour, and the
+  cell's state (size, energy, damage, DNA copied, internal chemicals).
+- **Place** any number of cells by clicking in the world (`Esc` to stop), or
+  **Apply** your changes to the cell you're editing. The simulation pauses
+  while you edit a living cell. Your changes are logged, and abilities you
+  add by hand are never credited to evolution.
+
 ## Settings
 
-All 132 constants are adjustable live from the **Settings** tab, each with
+All 138 constants are adjustable live from the **Settings** tab, each with
 units and an explanation. Settings marked **new world** apply when you create
 a new world. Presets include *After the Great Oxidation*, *Day and night*,
-*Fast evolution* and *Rich vents*.
+*Fast evolution*, *Rich vents*, *Stable world* (no climate change, vents last
+forever) and *Harsh world*.
 
 Worlds can be saved and loaded (top bar). Save files go in `saves/` in the
 folder you started from.
@@ -176,12 +220,14 @@ log. 216,000 steps is one simulated hour.
 ## Performance
 
 The simulation runs on all CPU cores, and the browser does the rendering on
-the GPU. A typical early world (~500–1,000 cells) runs at many times real time
-in Max mode.
+the GPU. A typical world settles at a few hundred cells and runs at many
+times real time in Max mode.
+
+**Settings → Growth & division → Population cap** (default 1,200) is the most
+cells a world can hold. At the cap, cells wait to divide instead of swelling.
 
 A MacBook Air has no fan, so it slows itself down under long full load. Keep
-it plugged in for long runs. **Settings → Growth & division → Population safety
-cap** limits how many cells can exist.
+it plugged in for long runs.
 
 ## Roadmap
 

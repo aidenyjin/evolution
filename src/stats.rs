@@ -19,6 +19,12 @@ pub struct HistPoint {
     pub lineages: u32,
     pub size: f32,
     pub t_opt: f32,
+    /// Proteome-weighted best activity of each protein (1 = perfect).
+    #[serde(default)]
+    pub quality: f32,
+    /// Ocean temperature offset from the climate cycle (°C).
+    #[serde(default)]
+    pub climate: f32,
     pub births: u64,
     pub deaths: u64,
     /// Cumulative deaths by cause (see cell::CAUSE_NAMES).
@@ -87,11 +93,12 @@ impl Stats {
         }
     }
 
-    pub fn record(&mut self, cells: &[Cell], grid: &[Vec<f32>], dx: f32, t: f64, force: bool) {
+    pub fn record(&mut self, cells: &[Cell], grid: &[Vec<f32>], dx: f32, t: f64, climate: f32, force: bool) {
         let mut strat = [0u32; NSTRAT + 1];
         let mut genes = 0.0;
         let mut size = 0.0;
         let mut topt = 0.0;
+        let mut quality = 0.0;
         let mut max_gen = 0;
         let mut lineages = HashSet::new();
         for c in cells {
@@ -102,6 +109,7 @@ impl Stats {
             genes += c.genome.genes.len() as f32;
             size += c.biomass;
             topt += c.t_opt();
+            quality += c.enzyme_quality();
             max_gen = max_gen.max(c.generation);
             lineages.insert(c.lineage);
         }
@@ -121,6 +129,8 @@ impl Stats {
             lineages: lineages.len() as u32,
             size: size / n,
             t_opt: topt / n,
+            quality: quality / n,
+            climate,
             births: self.births,
             deaths: self.deaths,
             deaths_by: self.deaths_by,
@@ -149,7 +159,7 @@ impl Stats {
         self.latest = Some(pt);
     }
 
-    fn push_event(&mut self, t: f64, step: u64, kind: &str, text: String, cell: Option<u64>, x: f32, y: f32) {
+    pub fn push_event(&mut self, t: f64, step: u64, kind: &str, text: String, cell: Option<u64>, x: f32, y: f32) {
         self.event_total += 1;
         self.events.push(Event { seq: self.event_total, t, step, kind: kind.to_string(), text, cell, x, y });
         if self.events.len() > 500 {

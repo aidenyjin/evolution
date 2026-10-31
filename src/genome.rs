@@ -137,7 +137,10 @@ pub fn fold(codons: &[u8]) -> Protein {
     gc /= len;
     let membrane = sigmoid((hyd - 0.1) / 0.05);
     let fold = sigmoid((len - 24.0) / 3.0);
-    let t_opt = 90.0 * gc;
+    // G/C-rich (third position especially) proteins are more heat-stable.
+    // One synonymous G/C<->A/U change in a ~50-codon protein shifts its
+    // optimum by ~2.5 °C, within the 1-5 °C of real stabilising mutations.
+    let t_opt = (180.0 * gc - 48.0).clamp(0.0, 100.0);
 
     let mut acts = Vec::new();
     let inv = 1.0 / (2.0 * SITE_SIGMA * SITE_SIGMA);
@@ -328,12 +331,21 @@ impl Genome {
 /// site, with the requested location and temperature optimum. Used only to
 /// build the ancestral cell at world creation.
 pub fn design_gene(target: usize, membrane: bool, t_opt: f32, len: usize, rng: &mut Rng) -> Vec<u8> {
+    design_gene_quality(target, membrane, t_opt, len, 1.0, rng)
+}
+
+/// Like `design_gene`, but aims for a protein that performs its function
+/// only at `quality` (0..1] of the best possible activity: a sloppy,
+/// primitive enzyme that evolution can improve.
+pub fn design_gene_quality(target: usize, membrane: bool, t_opt: f32, len: usize, quality: f32, rng: &mut Rng) -> Vec<u8> {
     let u = universe();
     let site = u.sites[target];
+    // Distance from the site that gives the requested activity.
+    let want = SITE_SIGMA * (-2.0 * quality.clamp(0.05, 1.0).ln()).sqrt();
     let score = |p: &Protein| -> f32 {
-        let d2: f32 = (0..SHAPE_DIM).map(|k| (p.shape[k] - site[k]).powi(2)).sum();
+        let d: f32 = (0..SHAPE_DIM).map(|k| (p.shape[k] - site[k]).powi(2)).sum::<f32>().sqrt();
         let loc = if membrane { 1.0 - p.membrane } else { p.membrane };
-        d2 + 2.0 * loc * loc + ((p.t_opt - t_opt) / 12.0).powi(2)
+        (d - want).powi(2) + 2.0 * loc * loc + ((p.t_opt - t_opt) / 12.0).powi(2)
     };
     let mut best: Vec<u8> = (0..len).map(|_| rng.below(64) as u8).collect();
     let mut best_s = score(&fold(&best));
@@ -356,20 +368,22 @@ pub fn design_gene(target: usize, membrane: bool, t_opt: f32, len: usize, rng: &
     best
 }
 
-/// The last universal common ancestor: a vent-dwelling chemosynthesizer that
-/// makes energy from H₂ + CO₂ (acetogenesis), fixes carbon with H₂, and can
+/// The last universal common ancestor: a primitive, heat-loving vent
+/// dweller. Its enzymes are sloppy generalists (about half as good as they
+/// could be), as early enzymes are thought to have been, so evolution has
+/// room to improve them. It makes energy from H₂ + CO₂ (acetogenesis), fixes carbon with H₂, and can
 /// import ammonium and phosphate. Everything else must evolve.
 pub fn luca(rng: &mut Rng) -> Genome {
-    let t = 48.0;
-    let mk = |f: usize, mem: bool, len: usize, prom: f32, rng: &mut Rng| {
-        let codons = design_gene(f, mem, t, len, rng);
+    let t = 56.0;
+    let mk = |f: usize, mem: bool, len: usize, prom: f32, q: f32, rng: &mut Rng| {
+        let codons = design_gene_quality(f, mem, t, len, q, rng);
         Gene::new(codons, prom, [rng.normal(), rng.normal()])
     };
     let genes = vec![
-        mk(chem::R_ACETOGENESIS, false, 54, 0.40, rng),
-        mk(chem::R_H2FIX, false, 50, 0.14, rng),
-        mk(chem::F_TRANSPORT0 + 3, true, 46, 0.08, rng), // NH4+ transporter
-        mk(chem::F_TRANSPORT0 + 4, true, 46, 0.06, rng), // PO4 transporter
+        mk(chem::R_ACETOGENESIS, false, 54, 0.45, 0.55, rng),
+        mk(chem::R_H2FIX, false, 50, 0.16, 0.55, rng),
+        mk(chem::F_TRANSPORT0 + 3, true, 46, 0.09, 0.6, rng), // NH4+ transporter
+        mk(chem::F_TRANSPORT0 + 4, true, 46, 0.07, 0.6, rng), // PO4 transporter
     ];
     let mut g = Genome { genes, ribo: 1.0, div_size: 36.0, hue: 0.07, total_codons: 0, has_regulators: false, mutations: 0 };
     g.finish();

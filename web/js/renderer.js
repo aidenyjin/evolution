@@ -24,7 +24,7 @@ uniform vec2 u_res; uniform vec3 u_cam; uniform vec2 u_world;
 uniform float u_time, u_day, u_wavePeriod, u_ovOn, u_ovRamp;
 uniform vec3 u_light; uniform vec3 u_ovColor;
 uniform sampler2D u_static, u_overlay;
-uniform vec3 u_vents[16]; uniform int u_nvents;
+uniform vec3 u_vents[24]; uniform int u_nvents;
 out vec4 o;
 ${NOISE}
 float caustic(vec2 p, float t) {
@@ -70,7 +70,7 @@ void main() {
   col += vec3(.5, .7, .75) * z.z * (sin(wph) * .5 + .5) * .05;
   float h = st.a;
   col += vec3(1., .42, .12) * pow(h, 2.5) * .5 * (.85 + .15 * sin(u_time * 2.3 + wp.y * .2));
-  for (int i = 0; i < 16; i++) {
+  for (int i = 0; i < 24; i++) {
     if (i >= u_nvents) break;
     vec3 v = u_vents[i];
     float d = length(wp - v.xy);
@@ -672,9 +672,13 @@ export class Renderer {
     gl.uniform1f(u.u_ovOn, this.overlay ? 1 : 0);
     gl.uniform1f(u.u_ovRamp, this.overlay ? this.overlay.ramp : 0);
     gl.uniform3f(u.u_ovColor, ...(this.overlay ? this.overlay.color : [1, 1, 1]));
-    const vv = new Float32Array(48);
-    const nv = Math.min(16, this.vents.length);
-    for (let i = 0; i < nv; i++) { vv[i * 3] = this.vents[i].x; vv[i * 3 + 1] = this.vents[i].y; vv[i * 3 + 2] = this.ventRadius ?? 10; }
+    const vv = new Float32Array(72);
+    const nv = Math.min(24, this.vents.length);
+    for (let i = 0; i < nv; i++) {
+      const v = this.vents[i];
+      const env = v.env ?? 1;
+      vv[i * 3] = v.x; vv[i * 3 + 1] = v.y; vv[i * 3 + 2] = (this.ventRadius ?? 10) * (0.35 + 0.65 * env);
+    }
     gl.uniform3fv(u.u_vents, vv);
     gl.uniform1i(u.u_nvents, nv);
     gl.activeTexture(gl.TEXTURE0);

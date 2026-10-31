@@ -86,6 +86,9 @@ pub struct Cell {
     /// Smoothed temperature suitability (1 = at optimum).
     #[serde(default)]
     pub thermal: f32,
+    /// How hard neighbours are squeezing this cell (sum of relative overlaps).
+    #[serde(default)]
+    pub pressure: f32,
     /// DNA replication progress 0..1.
     pub replication: f32,
     /// <0 when not dividing; otherwise pinch progress 0..1.
@@ -130,6 +133,7 @@ impl Cell {
             growth: 0.0,
             dmg_src: [0.0; 4],
             thermal: 1.0,
+            pressure: 0.0,
             replication: 0.0,
             dividing: -1.0,
             div_axis: 0.0,
@@ -219,6 +223,30 @@ impl Cell {
         let mut t = [1.0f32; MAXG];
         self.regulation_into(&mut t);
         t[..n].to_vec()
+    }
+
+    /// How good this cell's tools are for the jobs it actually does: for
+    /// each function in real use, the activity of its best protein,
+    /// averaged by how much the cell relies on that function. Spare gene
+    /// copies drifting toward new jobs don't drag it down.
+    pub fn enzyme_quality(&self) -> f32 {
+        let mut best = [0.0f32; NF];
+        let mut used = [0.0f32; NF];
+        for (e, g) in self.expr.iter().zip(&self.genome.genes) {
+            for &(f, a) in &g.protein.acts {
+                let f = f as usize;
+                best[f] = best[f].max(a);
+                used[f] += e * a;
+            }
+        }
+        let (mut s, mut w) = (0.0, 0.0);
+        for f in 0..NF {
+            if used[f] > 0.01 {
+                s += used[f] * best[f];
+                w += used[f];
+            }
+        }
+        if w > 1e-6 { s / w } else { 0.0 }
     }
 
     /// Expression-weighted temperature optimum of the proteome.
@@ -410,7 +438,14 @@ impl Cell {
             * sat(self.amt[chem::NH4] / area, chem.km[chem::NH4])
             * sat(self.amt[chem::PO4] / area, chem.km[chem::PO4])
             * sat(self.atp / area, p.km_atp);
-        let mut g = p.growth_rate * q10f * thermal * pace * health * self.expr_ribo * b * gsat;
+        // Squeezed cells can't expand: mechanical pressure stops growth.
+        let crowd = (-p.crowding * (self.pressure - 0.2).max(0.0)).exp();
+        let mut g = p.growth_rate * q10f * thermal * pace * health * self.expr_ribo * b * gsat * crowd;
+        // At the population cap, cells that are ready to divide arrest
+        // instead of swelling.
+        if !can_divide && self.biomass >= self.genome.div_size {
+            g = 0.0;
+        }
         g = g
             .min(0.5 * self.amt[chem::SUGAR] / dt)
             .min(0.5 * self.amt[chem::NH4] / (p.biomass_n.max(1e-6) * dt))

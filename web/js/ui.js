@@ -28,7 +28,9 @@ export const PRESETS = [
   { name: 'Early Earth (defaults)', reset: true, set: {} },
   { name: 'After the Great Oxidation (O₂ in the air)', set: { atm_o2: 1.2 } },
   { name: 'Day and night', set: { day_night: 1 } },
-  { name: 'Fast evolution (×3 mutation)', set: { mut_point: 0.006, mut_indel: 0.0012, mut_dup: 0.09, mut_del: 0.06, mut_new_gene: 0.09, mut_promoter: 0.09 } },
+  { name: 'Fast evolution (×3 mutation)', set: { mut_point: 0.009, mut_indel: 0.0012, mut_dup: 0.09, mut_del: 0.06, mut_new_gene: 0.09, mut_promoter: 0.09 } },
+  { name: 'Stable world (no climate change, vents last forever)', set: { climate_amplitude: 0, vent_lifetime: 0 } },
+  { name: 'Harsh world (big climate swings, short-lived vents)', set: { climate_amplitude: 12, climate_period: 1200, vent_lifetime: 900 } },
   { name: 'Rich vents', set: { vent_h2: 1000, vent_h2s: 160, vent_minerals: 16 } },
   { name: 'Calm, still water', set: { current_strength: 0, wave_strength: 0 } },
   { name: 'Warm world', set: { temp_deep: 18, temp_shallow: 30, temp_beach: 36 } },
@@ -214,7 +216,7 @@ export class EventsPanel {
       this.el.innerHTML = `<div class="empty-state"><h4>No discoveries yet</h4><div>Milestones, new metabolic abilities and new ways of life will appear here as evolution finds them.</div></div>`;
       return;
     }
-    const kindName = { discovery: 'New ability', strategy: 'New way of life', milestone: 'Milestone', extinction: 'Extinction' };
+    const kindName = { discovery: 'New ability', strategy: 'New way of life', milestone: 'Milestone', extinction: 'Extinction', intervention: 'Your change', environment: 'Environment' };
     this.el.innerHTML = this.events.slice().reverse().map((e) => {
       const click = e.cell != null || e.x;
       return `<div class="event ${click ? 'clickable' : ''} ${fresh.has(e.seq) ? 'fresh' : ''}" data-seq="${e.seq}">
@@ -262,13 +264,18 @@ export class Graphs {
     genes.setSeries([{ name: 'Genes', color: [201, 167, 255], get: (p) => p.genes }]);
     const lin = new Chart(this.el, { title: 'Surviving founder lineages', sub: 'of the original LUCA cells', height: 110 });
     lin.setSeries([{ name: 'Lineages', color: [127, 176, 255], get: (p) => p.lineages }]);
-    const topt = new Chart(this.el, { title: 'Temperature preference', sub: 'average enzyme optimum, °C', zero: false, height: 110 });
-    topt.setSeries([{ name: 'T opt', color: [255, 179, 92], get: (p) => p.t_opt }]);
+    const quality = new Chart(this.el, { title: 'Enzyme quality', sub: 'how well proteins do their main job (1 = perfect)', zero: false, height: 110 });
+    quality.setSeries([{ name: 'Quality', color: [94, 230, 208], get: (p) => p.quality }]);
+    const topt = new Chart(this.el, { title: 'Temperature', sub: 'average enzyme optimum vs. shallow water, °C', zero: false, height: 120 });
+    topt.setSeries([
+      { name: 'Enzyme optimum', color: [255, 179, 92], get: (p) => p.t_opt },
+      { name: 'Shallow water', color: [127, 176, 255], get: (p) => (this.app.params?.temp_shallow ?? 20) + (p.climate || 0) },
+    ]);
     const size = new Chart(this.el, { title: 'Cell size', sub: 'average area, µm²', zero: false, height: 110 });
     size.setSeries([{ name: 'Size', color: [94, 230, 208], get: (p) => p.size }]);
     const gen = new Chart(this.el, { title: 'Generations', sub: 'longest line of descent', height: 110 });
     gen.setSeries([{ name: 'Generation', color: [255, 210, 122], get: (p) => p.max_gen }]);
-    this.charts = [pop, rates, causes, chem, genes, lin, topt, size, gen];
+    this.charts = [pop, rates, causes, quality, chem, genes, lin, topt, size, gen];
   }
 
   setHistory(hist) {

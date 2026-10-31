@@ -173,7 +173,7 @@ pub fn info_json(w: &World, paused: bool, speed: &Value) -> Value {
 }
 
 pub fn stats_json(w: &World, sps: f32, paused: bool, speed: &Value) -> Value {
-    let vents: Vec<f32> = w.vents.iter().map(|v| v.output).collect();
+    let vents: Vec<Value> = w.vents.iter().map(|v| json!({"x": v.x, "y": v.y, "output": v.output, "env": v.envelope()})).collect();
     let last_events: Vec<&crate::stats::Event> = w.stats.events.iter().rev().take(20).collect();
     json!({
         "type": "stats",
@@ -189,6 +189,7 @@ pub fn stats_json(w: &World, sps: f32, paused: bool, speed: &Value) -> Value {
         "events": last_events,
         "vents": vents,
         "daylight": w.daylight(),
+        "climate": w.climate_now,
         "births": w.stats.births,
         "deaths": w.stats.deaths,
         "peak": w.stats.peak,

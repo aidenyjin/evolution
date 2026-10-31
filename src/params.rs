@@ -88,17 +88,21 @@ params! {
             "Ambient temperature of the wet shoreline.";
         vent_temp: "Vent core temperature", "°C", 75.0, 10.0, 120.0, false,
             "Water temperature right at a vent opening.";
-        vent_heat_radius: "Vent heat radius", "µm", 30.0, 5.0, 150.0, true,
+        vent_heat_radius: "Vent heat radius", "µm", 45.0, 5.0, 150.0, true,
             "How far vent heat reaches before fading into the cold deep.";
         q10: "Q10 temperature coefficient", "×", 2.0, 1.0, 4.0, false,
             "How much faster chemistry runs per 10 °C warmer (Arrhenius behaviour; ~2 for most enzymes).";
         thermal_tolerance: "Enzyme thermal tolerance", "°C", 14.0, 3.0, 40.0, false,
             "Width of each protein's temperature-activity curve around its evolved optimum.";
+        climate_amplitude: "Climate swing", "°C", 5.0, 0.0, 30.0, false,
+            "How far ocean temperatures drift up and down over the slow climate cycle. Vent cores are unaffected.";
+        climate_period: "Climate cycle length", "s", 2400.0, 60.0, 50000.0, false,
+            "Time for one full warm-cold climate cycle.";
         heat_damage: "Heat damage rate", "/s", 0.01, 0.0, 0.2, false,
             "Protein denaturation damage per second per 10 °C above a cell's tolerance.";
     }
     "Vents" => {
-        vent_h2: "Vent H₂ output", "units/s", 450.0, 0.0, 2000.0, false,
+        vent_h2: "Vent H₂ output", "units/s", 340.0, 0.0, 2000.0, false,
             "Hydrogen released by each vent.";
         vent_h2s: "Vent H₂S output", "units/s", 60.0, 0.0, 1000.0, false,
             "Hydrogen sulfide released by each vent.";
@@ -106,6 +110,8 @@ params! {
             "Ammonium released by each vent (phosphate is released at 1/8 of this).";
         vent_radius: "Vent opening radius", "µm", 10.0, 2.0, 60.0, true,
             "Size of the area each vent releases chemicals into.";
+        vent_lifetime: "Vent lifetime", "s", 2400.0, 0.0, 20000.0, false,
+            "How long a vent lasts before it fades out and a new one opens somewhere else in the deep. 0 = vents last forever.";
         vent_variability: "Vent pulsing", "fraction", 0.35, 0.0, 1.0, false,
             "How strongly vent output fluctuates over time.";
         vent_period: "Vent pulse period", "s", 400.0, 20.0, 5000.0, false,
@@ -151,12 +157,14 @@ params! {
         nh4_deep: "Ammonium: deep", "units/µm²", 0.04, 0.0, 5.0, false, "Background ammonium (nitrogen source) in deep water.";
         nh4_shallow: "Ammonium: shallow", "units/µm²", 0.12, 0.0, 5.0, false, "Background ammonium in shallow water.";
         nh4_beach: "Ammonium: beach", "units/µm²", 0.45, 0.0, 5.0, false, "Background ammonium on the beach (runoff from land).";
-        po4_deep: "Phosphate: deep", "units/µm²", 0.008, 0.0, 2.0, false, "Background phosphate in deep water.";
-        po4_shallow: "Phosphate: shallow", "units/µm²", 0.025, 0.0, 2.0, false, "Background phosphate in shallow water.";
-        po4_beach: "Phosphate: beach", "units/µm²", 0.10, 0.0, 2.0, false, "Background phosphate on the beach (weathered rock).";
+        po4_deep: "Phosphate: deep", "units/µm²", 0.004, 0.0, 2.0, false, "Background phosphate in deep water.";
+        po4_shallow: "Phosphate: shallow", "units/µm²", 0.0035, 0.0, 2.0, false, "Background phosphate in shallow water.";
+        po4_beach: "Phosphate: beach", "units/µm²", 0.012, 0.0, 2.0, false, "Background phosphate on the beach (weathered rock).";
         so4_background: "Sulfate background", "units/µm²", 0.05, 0.0, 5.0, false, "Background sulfate. Early oceans had little.";
         sulfide_oxidation: "Abiotic sulfide oxidation", "/(units·s)", 0.3, 0.0, 10.0, false,
             "Rate at which H₂S reacts with O₂ spontaneously, without any cell involved.";
+        organic_washout: "Organic washout", "/s", 0.004, 0.0, 0.2, false,
+            "Rate at which dissolved sugar, acetate and dead-cell organics are carried off into the wider ocean. Stops food from piling up forever.";
         dom_hydrolysis: "Dead matter breakdown", "/s", 0.006, 0.0, 1.0, false,
             "Rate at which dead-cell organic matter spontaneously breaks down into sugar.";
     }
@@ -182,7 +190,7 @@ params! {
             "Light intensity at which photosynthesis runs at half speed.";
     }
     "Enzyme speeds" => {
-        bio_pace: "Biological pace", "×", 1.0, 0.05, 20.0, false,
+        bio_pace: "Biological pace", "×", 1.5, 0.05, 20.0, false,
             "Speeds up or slows down all of biology (reactions, growth, damage, replication) together, keeping their ratios.";
         k_acetogenesis: "Acetogenesis", "/s", 0.5, 0.0, 10.0, false, "4H₂ + 2CO₂ → acetate (chemosynthesis). Max turnovers per enzyme unit per second.";
         k_h2fix: "H₂ carbon fixation", "/s", 0.35, 0.0, 10.0, false, "2H₂ + CO₂ → sugar.";
@@ -230,7 +238,7 @@ params! {
         division_duration: "Division duration", "s", 2.5, 0.2, 30.0, false, "Time for the membrane to pinch in two.";
         division_noise: "Division asymmetry", "fraction", 0.04, 0.0, 0.3, false, "Random unevenness when contents are split between daughters.";
         min_size: "Starvation size limit", "fraction", 0.25, 0.05, 0.9, false, "A cell that shrinks below this fraction of its division size dies.";
-        max_population: "Population safety cap", "cells", 30000.0, 100.0, 200000.0, false, "Division pauses above this many cells, to protect your computer.";
+        max_population: "Population cap", "cells", 1200.0, 50.0, 200000.0, false, "Cells stop dividing at this population (they wait instead of swelling). Most worlds settle well below it; it keeps booming worlds readable and your computer cool.";
     }
     "Damage & death" => {
         aging_rate: "Aging damage", "/s", 0.0015, 0.0, 0.1, false, "Baseline molecular damage per second.";
@@ -240,12 +248,12 @@ params! {
         ros_decay: "ROS spontaneous decay", "/s", 0.5, 0.0, 20.0, false, "Reactive oxygen decays on its own at this rate.";
         repair_rate: "Repair rate", "/s", 0.01, 0.0, 1.0, false, "Damage a cell can repair per second if it has energy.";
         repair_atp: "Repair cost", "ATP/µm²", 2.0, 0.0, 50.0, false, "ATP per unit biomass to repair one full unit of damage.";
-        dormancy_floor: "Dormant upkeep", "fraction", 0.1, 0.0, 1.0, false, "When a cell can't metabolise (too cold, too hot, or out of energy) it goes dormant and its upkeep drops to this fraction, like real starving bacteria. 1 = no dormancy.";
+        dormancy_floor: "Dormant upkeep", "fraction", 0.4, 0.0, 1.0, false, "When a cell can't metabolise (too cold, too hot, or out of energy) it goes dormant and its upkeep drops to this fraction, like real starving bacteria. 1 = no dormancy.";
         starvation_damage: "Starvation damage", "/s", 0.04, 0.0, 1.0, false, "Damage per second while out of energy.";
         autophagy_yield: "Self-digestion yield", "ATP/µm²", 1.0, 0.0, 10.0, false, "ATP recovered by digesting own biomass when starving.";
     }
     "Mutation" => {
-        mut_point: "Point mutation rate", "/codon", 0.002, 0.0, 0.1, false, "Chance per codon per replication that one base changes.";
+        mut_point: "Point mutation rate", "/codon", 0.003, 0.0, 0.1, false, "Chance per codon per replication that one base changes.";
         mut_indel: "Insertion/deletion rate", "/codon", 0.0004, 0.0, 0.05, false, "Chance per codon of inserting or deleting a codon.";
         mut_dup: "Gene duplication", "/genome", 0.03, 0.0, 1.0, false, "Chance per replication that a gene is duplicated.";
         mut_del: "Gene loss", "/genome", 0.02, 0.0, 1.0, false, "Chance per replication that a gene is deleted.";
@@ -260,6 +268,8 @@ params! {
     "Physics" => {
         viscosity: "Water viscosity", "× water", 1.0, 0.1, 20.0, false, "Thicker water slows swimming and Brownian motion.";
         brownian: "Brownian motion", "× real", 1.0, 0.0, 50.0, false, "Thermal jiggling of cells (Stokes–Einstein). 1 = physically accurate.";
+        crowding: "Crowding growth limit", "", 3.0, 0.0, 20.0, false,
+            "How strongly being squeezed by neighbours stops a cell from growing (mechanical pressure). 0 = cells keep growing however packed they are.";
         collision_stiffness: "Collision stiffness", "", 0.35, 0.01, 1.0, false, "How firmly cells push each other apart.";
         membrane_tension: "Membrane tension", "", 0.3, 0.0, 1.0, false, "How strongly membranes resist wrinkling.";
         membrane_relax: "Membrane elasticity", "", 0.12, 0.0, 1.0, false, "How quickly squashed membranes spring back.";

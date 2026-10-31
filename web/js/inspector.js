@@ -29,6 +29,7 @@ export class Inspector {
       const act = t.dataset.act;
       if (act === 'follow') this.app.toggleFollow();
       else if (act === 'close') this.app.select(null);
+      else if (act === 'edit') this.app.openEditor('edit');
       else if (act === 'seq') {
         const g = Number(t.dataset.gene);
         if (this.open.has(g)) this.open.delete(g); else this.open.add(g);
@@ -102,7 +103,7 @@ export class Inspector {
       <div class="insp-head">
         <div class="insp-swatch" style="background:${css(c.color.map((x) => x * 0.35))};border-color:${css(c.color)}"></div>
         <div><div class="insp-title">Cell #${c.id}</div><div class="insp-sub">Generation ${c.generation} · lineage ${c.lineage} · age ${fmtTime(c.age)}</div></div>
-        <div class="insp-actions"><button class="btn small ${this.app.follow ? 'toggled' : ''}" data-act="follow" title="Keep the camera on this cell, and jump to a daughter when it divides (F)">Follow</button><button class="btn small" data-act="close" title="Deselect (Esc)">✕</button></div>
+        <div class="insp-actions"><button class="btn small" data-act="edit" title="Edit this cell's genes and state">Edit</button><button class="btn small ${this.app.follow ? 'toggled' : ''}" data-act="follow" title="Keep the camera on this cell, and jump to a daughter when it divides (F)">Follow</button><button class="btn small" data-act="close" title="Deselect (Esc)">✕</button></div>
       </div>
       <div class="card"><h4>Vital signs</h4>
         ${meter('Size', c.biomass / c.div_size, `${c.biomass.toFixed(1)} µm²`)}

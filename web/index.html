@@ -83,11 +83,13 @@
   <aside id="sidepanel" class="glass panel-right">
     <nav class="tabs" role="tablist">
       <button class="tab active" data-tab="cell">Cell</button>
+      <button class="tab" data-tab="editor">Editor</button>
       <button class="tab" data-tab="graphs">Graphs</button>
       <button class="tab" data-tab="events">Discoveries <span id="events-badge" class="badge hidden">0</span></button>
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
     <div class="tab-body" id="tab-cell"></div>
+    <div class="tab-body hidden" id="tab-editor"></div>
     <div class="tab-body hidden" id="tab-graphs"></div>
     <div class="tab-body hidden" id="tab-events"></div>
     <div class="tab-body hidden" id="tab-settings"></div>
@@ -100,6 +102,8 @@
   <canvas id="minimap" class="glass" width="240" height="150" title="Click to jump"></canvas>
   <div id="zone-labels"></div>
   <div id="tooltip" class="glass-lite hidden"></div>
+  <div id="place-ghost" class="hidden"></div>
+  <div id="place-banner" class="glass hidden"></div>
   <div id="toasts"></div>
   <div id="connection" class="hidden"><div class="glass conn-card"><div class="spinner"></div><span id="conn-text">Connecting to simulation…</span></div></div>
 

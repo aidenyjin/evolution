@@ -26,6 +26,7 @@ const FILES: &[(&str, &str, &str)] = &[
     ("js/ui.js", "text/javascript; charset=utf-8", include_str!("../web/js/ui.js")),
     ("js/charts.js", "text/javascript; charset=utf-8", include_str!("../web/js/charts.js")),
     ("js/inspector.js", "text/javascript; charset=utf-8", include_str!("../web/js/inspector.js")),
+    ("js/editor.js", "text/javascript; charset=utf-8", include_str!("../web/js/editor.js")),
 ];
 
 #[derive(Clone, Copy, PartialEq)]
@@ -59,6 +60,16 @@ pub enum Cmd {
     Save(Option<String>, oneshot::Sender<String>),
     Load(String, oneshot::Sender<String>),
     ListSaves(oneshot::Sender<String>),
+    /// Fold codon strings into proteins (editor previews).
+    Fold(Vec<Value>, oneshot::Sender<String>),
+    /// Design a gene for a function: (function, temperature, length, location).
+    Design(usize, f32, usize, String, oneshot::Sender<String>),
+    Template(String, oneshot::Sender<String>),
+    CellSpec(u64, oneshot::Sender<String>),
+    EditCell(u64, Value, oneshot::Sender<String>),
+    /// Place new cells: (spec, x, y, count, spread).
+    Spawn(Value, f32, f32, usize, f32, oneshot::Sender<String>),
+    DeleteCell(u64, oneshot::Sender<String>),
 }
 
 #[derive(Clone)]
@@ -69,6 +80,7 @@ struct AppState {
     stats: watch::Receiver<Arc<String>>,
     params: watch::Receiver<Arc<String>>,
     info_ver: watch::Receiver<u64>,
+    statics: watch::Receiver<Arc<Vec<u8>>>,
 }
 
 struct Outputs {
@@ -77,6 +89,7 @@ struct Outputs {
     stats: watch::Sender<Arc<String>>,
     params: watch::Sender<Arc<String>>,
     info_ver: watch::Sender<u64>,
+    statics: watch::Sender<Arc<Vec<u8>>>,
 }
 
 fn saves_dir() -> std::path::PathBuf {
@@ -106,6 +119,7 @@ fn run_sim(mut world: World, rx: mpsc::Receiver<Cmd>, out: Outputs) {
     let mut next_frame = Instant::now();
     let mut last_grid = Instant::now() - Duration::from_secs(1);
     let mut last_stats = Instant::now() - Duration::from_secs(1);
+    let mut last_static = Instant::now();
     let mut sps_t0 = Instant::now();
     let mut sps_count: u64 = 0;
     let mut sps = 0.0f32;
@@ -193,6 +207,43 @@ fn run_sim(mut world: World, rx: mpsc::Receiver<Cmd>, out: Outputs) {
                     };
                     let _ = reply.send(msg);
                 }
+                Cmd::Fold(seqs, reply) => {
+                    let _ = reply.send(crate::editor::fold_many(&seqs).to_string());
+                }
+                Cmd::Design(f, t_opt, len, loc, reply) => {
+                    let seed = world.rng.next_u64();
+                    let _ = reply.send(crate::editor::design(f, t_opt, len, &loc, seed).to_string());
+                }
+                Cmd::Template(name, reply) => {
+                    let _ = reply.send(crate::editor::template(&name).to_string());
+                }
+                Cmd::CellSpec(id, reply) => {
+                    let _ = reply.send(crate::editor::cell_spec(&world, id).to_string());
+                }
+                Cmd::EditCell(id, spec, reply) => {
+                    let r = world.edit_cell(id, &spec);
+                    force_publish = true;
+                    let _ = reply.send(match r {
+                        Ok(t) => toast(t, true),
+                        Err(e) => toast(e, false),
+                    });
+                }
+                Cmd::Spawn(spec, x, y, count, spread, reply) => {
+                    let r = world.spawn_cells(&spec, x, y, count, spread);
+                    force_publish = true;
+                    let _ = reply.send(match r {
+                        Ok(t) => toast(t, true),
+                        Err(e) => toast(e, false),
+                    });
+                }
+                Cmd::DeleteCell(id, reply) => {
+                    let r = world.delete_cell(id);
+                    force_publish = true;
+                    let _ = reply.send(match r {
+                        Ok(t) => toast(t, true),
+                        Err(e) => toast(e, false),
+                    });
+                }
                 Cmd::ListSaves(reply) => {
                     let mut files = Vec::new();
                     if let Ok(rd) = std::fs::read_dir(saves_dir()) {
@@ -276,6 +327,11 @@ fn run_sim(mut world: World, rx: mpsc::Receiver<Cmd>, out: Outputs) {
             sps_count = 0;
             sps_t0 = now;
         }
+        // Vent heat changes as vents age, so resend the heat map now and then.
+        if stepped > 0 && world.params.vent_lifetime > 0.0 && now - last_static > Duration::from_millis(1500) {
+            last_static = now;
+            let _ = out.statics.send(Arc::new(protocol::encode_static(&world)));
+        }
         if now - last_stats > Duration::from_millis(400) || force_publish {
             last_stats = now;
             let _ = out.stats.send(Arc::new(protocol::stats_json(&world, sps, paused, &speed.json()).to_string()));
@@ -307,10 +363,11 @@ pub fn serve(world: World, port: u16, open_browser: bool) {
     let (stats_tx, stats_rx) = watch::channel(Arc::new(String::new()));
     let (params_tx, params_rx) = watch::channel(Arc::new(params_json(&world.params)));
     let (info_tx, info_rx) = watch::channel(0u64);
-    let out = Outputs { frames: frames_tx, grid: grid_tx, stats: stats_tx, params: params_tx, info_ver: info_tx };
+    let (statics_tx, statics_rx) = watch::channel(Arc::new(Vec::new()));
+    let out = Outputs { frames: frames_tx, grid: grid_tx, stats: stats_tx, params: params_tx, info_ver: info_tx, statics: statics_tx };
     std::thread::Builder::new().name("simulation".into()).spawn(move || run_sim(world, cmd_rx, out)).expect("spawn simulation");
 
-    let state = AppState { cmd: cmd_tx, frames: frames_rx, grid: grid_rx, stats: stats_rx, params: params_rx, info_ver: info_rx };
+    let state = AppState { cmd: cmd_tx, frames: frames_rx, grid: grid_rx, stats: stats_rx, params: params_rx, info_ver: info_rx, statics: statics_rx };
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("tokio runtime");
     rt.block_on(async move {
         let app = Router::new()
@@ -373,6 +430,8 @@ async fn client(socket: WebSocket, st: AppState) {
     let mut stats = st.stats.clone();
     let mut params = st.params.clone();
     let mut info_ver = st.info_ver.clone();
+    let mut statics = st.statics.clone();
+    statics.borrow_and_update();
     info_ver.borrow_and_update();
     params.borrow_and_update();
 
@@ -397,6 +456,11 @@ async fn client(socket: WebSocket, st: AppState) {
                 if r.is_err() { break; }
                 let s = stats.borrow_and_update().clone();
                 if !s.is_empty() && sink.send(Message::Text(s.as_ref().clone())).await.is_err() { break; }
+            }
+            r = statics.changed() => {
+                if r.is_err() { break; }
+                let s = statics.borrow_and_update().clone();
+                if !s.is_empty() && sink.send(Message::Binary(s.as_ref().clone())).await.is_err() { break; }
             }
             r = params.changed() => {
                 if r.is_err() { break; }
@@ -432,7 +496,7 @@ async fn handle_message(st: &AppState, text: &str) -> Option<String> {
         let _ = st.cmd.send(c);
         None
     };
-    match cmd {
+    let reply = match cmd {
         "pause" => send(Cmd::Pause),
         "resume" => send(Cmd::Resume),
         "step" => send(Cmd::Step(v.get("n").and_then(|n| n.as_u64()).unwrap_or(1) as u32)),
@@ -455,6 +519,39 @@ async fn handle_message(st: &AppState, text: &str) -> Option<String> {
         "save" => request(st, |tx| Cmd::Save(v.get("name").and_then(|n| n.as_str()).map(String::from), tx)).await,
         "load" => request(st, |tx| Cmd::Load(v.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string(), tx)).await,
         "list_saves" => request(st, Cmd::ListSaves).await,
+        "fold" => request(st, |tx| Cmd::Fold(v.get("seqs").and_then(|s| s.as_array()).cloned().unwrap_or_default(), tx)).await,
+        "design" => {
+            let f = v.get("f").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+            let t = v.get("t_opt").and_then(|x| x.as_f64()).unwrap_or(48.0) as f32;
+            let len = v.get("len").and_then(|x| x.as_u64()).unwrap_or(50) as usize;
+            let loc = v.get("loc").and_then(|x| x.as_str()).unwrap_or("auto").to_string();
+            request(st, |tx| Cmd::Design(f, t, len, loc, tx)).await
+        }
+        "template" => request(st, |tx| Cmd::Template(v.get("name").and_then(|n| n.as_str()).unwrap_or("luca").to_string(), tx)).await,
+        "cell_spec" => request(st, |tx| Cmd::CellSpec(v.get("id").and_then(|i| i.as_u64()).unwrap_or(0), tx)).await,
+        "edit_cell" => {
+            let id = v.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
+            let spec = v.get("spec").cloned().unwrap_or(Value::Null);
+            request(st, |tx| Cmd::EditCell(id, spec, tx)).await
+        }
+        "spawn" => {
+            let spec = v.get("spec").cloned().unwrap_or(Value::Null);
+            let num = |k: &str, d: f64| v.get(k).and_then(|x| x.as_f64()).unwrap_or(d);
+            let (x, y, count, spread) = (num("x", 0.0) as f32, num("y", 0.0) as f32, num("count", 1.0) as usize, num("spread", 8.0) as f32);
+            request(st, |tx| Cmd::Spawn(spec, x, y, count, spread, tx)).await
+        }
+        "delete_cell" => request(st, |tx| Cmd::DeleteCell(v.get("id").and_then(|i| i.as_u64()).unwrap_or(0), tx)).await,
         _ => None,
+    };
+    // Echo the request id so the browser can match replies to requests.
+    match (reply, v.get("req")) {
+        (Some(r), Some(req)) => match serde_json::from_str::<Value>(&r) {
+            Ok(Value::Object(mut m)) => {
+                m.insert("req".into(), req.clone());
+                Some(Value::Object(m).to_string())
+            }
+            _ => Some(r),
+        },
+        (r, _) => r,
     }
 }

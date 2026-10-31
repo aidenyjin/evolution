@@ -3,6 +3,7 @@
 import { Net } from './net.js';
 import { Renderer, rampColor } from './renderer.js';
 import { Inspector } from './inspector.js';
+import { Editor } from './editor.js';
 import { Settings, EventsPanel, Graphs, toast } from './ui.js';
 import { fmtTime, fmtNum } from './charts.js';
 
@@ -38,6 +39,10 @@ class App {
     this.lineageCache = new Map();
 
     this.inspector = new Inspector($('tab-cell'), this);
+    this.editor = new Editor($('tab-editor'), this);
+    this.pending = new Map();
+    this.reqId = 0;
+    this.placing = null;
     this.settings = new Settings($('tab-settings'), this);
     this.events = new EventsPanel($('tab-events'), this);
     this.graphs = new Graphs($('tab-graphs'), this);
@@ -62,7 +67,23 @@ class App {
 
   // ------------------------------------------------------------------ data
 
+  /// Send a command and wait for its reply.
+  request(obj) {
+    const req = ++this.reqId;
+    return new Promise((resolve, reject) => {
+      this.pending.set(req, resolve);
+      this.net.send({ ...obj, req });
+      setTimeout(() => { if (this.pending.delete(req)) reject(new Error('timeout')); }, 15000);
+    });
+  }
+
   onJson(m) {
+    if (m.req != null && this.pending.has(m.req)) {
+      const res = this.pending.get(m.req);
+      this.pending.delete(m.req);
+      res(m);
+      return;
+    }
     switch (m.type) {
       case 'info': return this.onInfo(m);
       case 'stats': return this.onStats(m);
@@ -143,6 +164,12 @@ class App {
     $('ro-speed').textContent = this.paused ? 'paused' : `${rt >= 10 ? rt.toFixed(0) : rt.toFixed(1)}× real time`;
     $('ro-speed').title = `${Math.round(s.sps)} simulation steps per second`;
     this.r.daylight = s.daylight;
+    if (Array.isArray(s.vents) && s.vents.length && typeof s.vents[0] === 'object') this.r.vents = s.vents;
+    if (typeof s.climate === 'number' && Math.abs((this.climate ?? 0) - s.climate) > 0.05) {
+      this.climate = s.climate;
+      this.buildEnvTextures();
+      if (this.overlayKey === 'temp') this.refreshOverlay();
+    }
     // History: append the newest point, or resync if we fell out of step.
     if (s.hist_version !== this.histVersion) {
       if (s.hist_version === this.histVersion + 1 && s.last_point) {
@@ -201,7 +228,7 @@ class App {
     for (let i = 0; i < n; i++) {
       const z0 = st.rgba[i * 4] / 255, z1 = st.rgba[i * 4 + 1] / 255, z2 = st.rgba[i * 4 + 2] / 255, h = st.rgba[i * 4 + 3] / 255;
       const tot = z0 + z1 + z2 || 1;
-      const base = (z0 * p.temp_deep + z1 * p.temp_shallow + z2 * p.temp_beach) / tot;
+      const base = (z0 * p.temp_deep + z1 * p.temp_shallow + z2 * p.temp_beach) / tot + (this.climate || 0);
       const t = base + h * (p.vent_temp - base);
       this.tempField[i] = t;
       this.tempTex[i] = Math.max(0, Math.min(255, ((t + 2) / 92) * 255));
@@ -285,9 +312,40 @@ class App {
   select(id) {
     this.selected = id;
     this.selectedLast = null;
+    this.editor.selectionChanged();
     if (id == null) { this.follow = false; this.inspector.clear(); return; }
     this.showTab('cell');
     this.net.send({ cmd: 'inspect', id });
+  }
+
+  openEditor(kind) {
+    this.showTab('editor');
+    this.editor.load(kind);
+  }
+
+  // Placement mode: clicks in the world add designed cells.
+  startPlacing(spec, count, spread) {
+    this.placing = { spec: JSON.parse(JSON.stringify(spec)), count, spread };
+    $('place-banner').innerHTML = `Click in the world to place <b>${count}</b> cell${count === 1 ? '' : 's'} · <b>Esc</b> to stop`;
+    $('place-banner').classList.remove('hidden');
+    $('place-ghost').classList.remove('hidden');
+    this.canvas.classList.add('placing');
+  }
+
+  stopPlacing() {
+    if (!this.placing) return;
+    this.placing = null;
+    $('place-banner').classList.add('hidden');
+    $('place-ghost').classList.add('hidden');
+    this.canvas.classList.remove('placing');
+    this.editor.render();
+  }
+
+  async placeAt(sx, sy) {
+    const [x, y] = this.r.screenToWorld(sx, sy);
+    const p = this.placing;
+    const r = await this.request({ cmd: 'spawn', spec: p.spec, x, y, count: p.count, spread: p.spread });
+    toast(r.text, r.ok ? '' : 'error');
   }
 
   toggleFollow() {
@@ -448,6 +506,13 @@ class App {
     });
     cv.addEventListener('pointermove', (e) => {
       this.mouse = [e.clientX, e.clientY];
+      if (this.placing) {
+        const g = $('place-ghost');
+        const d = Math.max(10, this.placing.spread * 2 * this.r.cam.z);
+        g.style.width = g.style.height = `${d}px`;
+        g.style.left = `${e.clientX - d / 2}px`;
+        g.style.top = `${e.clientY - d / 2}px`;
+      }
       if (drag) {
         const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
         if (Math.abs(dx) + Math.abs(dy) > 3) { drag.moved = true; cv.classList.add('dragging'); if (this.follow) this.follow = false; }
@@ -462,8 +527,11 @@ class App {
     cv.addEventListener('pointerup', (e) => {
       cv.classList.remove('dragging');
       if (drag && !drag.moved) {
-        const i = this.r.pick(e.clientX, e.clientY);
-        this.select(i >= 0 ? this.cur.ids[i] : null);
+        if (this.placing) this.placeAt(e.clientX, e.clientY);
+        else {
+          const i = this.r.pick(e.clientX, e.clientY);
+          this.select(i >= 0 ? this.cur.ids[i] : null);
+        }
       }
       drag = null;
     });
@@ -494,7 +562,7 @@ class App {
         case '3': this.setSpeed('custom'); break;
         case '4': this.setSpeed('max'); break;
         case 'f': case 'F': if (this.selected != null) this.toggleFollow(); break;
-        case 'Escape': this.select(null); break;
+        case 'Escape': if (this.placing) this.stopPlacing(); else this.select(null); break;
         case 'h': case 'H': document.body.classList.toggle('ui-hidden'); break;
         case 'p': case 'P': this.togglePanel(); break;
         case '0': this.r.fitWorld(); break;

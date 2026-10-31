@@ -5,6 +5,7 @@
 
 mod cell;
 mod chem;
+mod editor;
 mod genome;
 mod params;
 mod protocol;
@@ -74,13 +75,14 @@ fn headless(params: Params, seed: u64, steps: u64) {
             let sps = if i == 0 { 0.0 } else { 1800.0 / last.elapsed().as_secs_f32() };
             last = std::time::Instant::now();
             println!(
-                "t={:7.0}s pop={:5} gen={:4} genes={:5.2} size={:5.1} topt={:4.1} atp={:.2} dmg={:.3} growth={:.4} | births={} deaths={} lineages={} | {:.0} steps/s",
+                "t={:7.0}s pop={:5} gen={:4} genes={:5.2} size={:5.1} topt={:4.1} q={:.2} atp={:.2} dmg={:.3} growth={:.4} | births={} deaths={} lineages={} | {:.0} steps/s",
                 l.t,
                 l.pop,
                 l.max_gen,
                 l.genes,
                 l.size,
                 l.t_opt,
+                l.quality,
                 avg(&|c| c.atp / c.biomass),
                 avg(&|c| c.damage),
                 avg(&|c| c.growth),
@@ -114,6 +116,15 @@ fn headless(params: Params, seed: u64, steps: u64) {
                 println!("  EVENT t={:.0}s {}", e.t, e.text);
             }
             seen_events = w.stats.event_total;
+        }
+    }
+    if let Some(c) = w.cells.iter().max_by_key(|c| c.generation) {
+        println!("sample genome (cell #{}, generation {}):", c.id, c.generation);
+        for (i, g) in c.genome.genes.iter().enumerate() {
+            let mut acts = g.protein.acts.clone();
+            acts.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            let top: Vec<String> = acts.iter().take(3).map(|(f, a)| format!("{} {:.0}%", chem::function_name(*f as usize), a * 100.0)).collect();
+            println!("  #{i} expr {:.1}% T_opt {:.0} | {}", c.expr.get(i).unwrap_or(&0.0) * 100.0, g.protein.t_opt, top.join(", "));
         }
     }
     let pr = w.prof;
